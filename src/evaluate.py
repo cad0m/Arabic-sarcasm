@@ -3,9 +3,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
 from scipy.stats import binomtest
-from sklearn.metrics import (average_precision_score, f1_score,
-                             precision_score, recall_score)
+from sklearn.metrics import average_precision_score, f1_score, precision_score, recall_score
 
 ROOT = Path(__file__).parent.parent
 RESULTS = ROOT / "results" / "results.csv"
@@ -60,9 +61,34 @@ def latency_per_tweet(predict, texts):
 def log_result(**row):
     RESULTS.parent.mkdir(exist_ok=True)
     table = pd.DataFrame([row])
-    if RESULTS.exists():
+    if RESULTS.exists() and RESULTS.stat().st_size > 0:
         table = pd.concat([pd.read_csv(RESULTS), table])
     table.to_csv(RESULTS, index=False)
+
+def show(name, scores, threshold, seconds):
+    print(f"{name:<28} f1={scores['f1']:.4f}  pr_auc={scores['pr_auc']:.4f}  "
+          f"threshold={threshold:.2f}  {seconds:.0f}s")
+
+def plot_results(table, metrics=("f1", "pr_auc")):
+    data = table.sort_values(metrics[0])
+
+    sns.set_theme(style="whitegrid")
+    ax = data[list(metrics)].plot.barh(
+        figsize=(9, 0.5 * len(data) + 1),
+        color=["#4C78A8", "#F2A541"],
+        width=0.7,
+    )
+
+    for bars in ax.containers:
+        ax.bar_label(bars, fmt="%.3f", padding=3, fontsize=9)
+
+    ax.set_xlim(0, data[list(metrics)].max().max() * 1.12)
+    ax.set_xlabel("Validation Score")
+    ax.set_ylabel("")
+    ax.legend(title="Metric", frameon=False)
+    sns.despine(left=True, bottom=True)
+    plt.tight_layout()
+    plt.show()
 
 
 def save_predictions(name, seed, ids, y_true, proba, threshold):
