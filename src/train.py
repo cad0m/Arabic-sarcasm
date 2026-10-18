@@ -5,15 +5,19 @@ import numpy as np
 import pandas as pd
 import torch
 from sklearn.metrics import precision_recall_curve
-from transformers import set_seed as set_transformers_seed
 
 
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    set_transformers_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    try:
+        from transformers.trainer_utils import set_seed as set_transformers_seed
+        set_transformers_seed(seed)
+    except Exception:
+        pass
 
 
 def best_threshold(y_true, proba):
