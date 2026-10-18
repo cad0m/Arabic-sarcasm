@@ -58,11 +58,21 @@ def latency_per_tweet(predict, texts):
     return (time.time() - start) / len(texts)
 
 
-def log_result(**row):
+def log_result(key_cols=("model", "preprocessing", "seed"), **row):
     RESULTS.parent.mkdir(exist_ok=True)
-    table = pd.DataFrame([row])
+    new_row = pd.DataFrame([row])
     if RESULTS.exists() and RESULTS.stat().st_size > 0:
-        table = pd.concat([pd.read_csv(RESULTS), table])
+        table = pd.read_csv(RESULTS)
+        # Determine matching subset columns that exist in both table and new row
+        match_cols = [c for c in key_cols if c in table.columns and c in new_row.columns]
+        if match_cols:
+            mask = np.ones(len(table), dtype=bool)
+            for col in match_cols:
+                mask &= (table[col].astype(str) == str(row[col]))
+            table = table[~mask]
+        table = pd.concat([table, new_row], ignore_index=True)
+    else:
+        table = new_row
     table.to_csv(RESULTS, index=False)
 
 def show(name, scores, threshold, seconds):
