@@ -12,5 +12,8 @@ dependencies = [
     "pandas>=3.0.6",
     "plotly>=7.1.0",
     "scikit-learn>=1.9.1",
+    "scipy>=1.17.1",
     "seaborn>=0.13.2",
+    "torch>=2.14.1",
+    "transformers>=5.20.1",
 ]
