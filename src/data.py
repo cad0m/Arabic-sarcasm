@@ -1,48 +1,63 @@
+from pathlib import Path
+
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from src.preprocess import build_pipeline
+from src.preprocess import normalize_letters, remove_diacritics, remove_kashida
 
 BASE = "https://raw.githubusercontent.com/iabufarha/ArSarcasm-v2/main/ArSarcasm-v2/"
-KEY_STEPS = ["html", "urls", "mentions", "diacritics", "kashida", "letters", "elongation"]
+SENTIMENT = {"NEG": 0, "NEU": 1, "POS": 2}
 
 
 def load_split():
     full = pd.read_csv(BASE + "training_data.csv")
     test = pd.read_csv(BASE + "testing_data.csv")
+    for f in (full, test):
+        f["sarcasm"] = f["sarcasm"].astype(str).str.lower().map({"true": 1, "false": 0})
+        f["sentiment_id"] = f["sentiment"].map(SENTIMENT)
     full["id"], test["id"] = range(len(full)), range(len(test))
-    for frame in (full, test):
-        frame["sarcasm"] = frame["sarcasm"].astype(str).str.lower().map({"true": 1, "false": 0})
     train, val = train_test_split(full, test_size=0.10, random_state=42, stratify=full["sarcasm"])
     return train, val, test
 
 
 def add_key(frame):
-    prep = build_pipeline(KEY_STEPS)
-    key = frame["tweet"].apply(prep).str.replace(r"[^\w\s]", " ", regex=True).str.split().str.join(" ")
-    return frame.assign(key=key.where(key != "", frame["tweet"]))
+    exact = frame["tweet"].map(lambda t: " ".join(t.split()))
+    norm = exact.map(lambda t: normalize_letters(remove_diacritics(remove_kashida(t))))
+    return frame.assign(key_exact=exact, key=norm)
 
 
 def clean_train(train, val, test):
-    report = {"start": len(train)}
+    r = {"start": len(train)}
 
-    for name, other in [("in_test", test), ("in_val", val)]:
-        found = train["key"].isin(other["key"])
-        report[name] = int(found.sum())
-        train = train[~found]
+    for k in ("key_exact", "key"):
+        r[f"{k}/dup_train"] = int(train[k].duplicated().sum())
+        r[f"{k}/dup_val"] = int(val[k].duplicated().sum())
+        r[f"{k}/dup_test"] = int(test[k].duplicated().sum())
+        r[f"{k}/train_in_test"] = int(train[k].isin(test[k]).sum())
+        r[f"{k}/test_in_train"] = int(test[k].isin(train[k]).sum())
 
-    conflicting = train.groupby("key")["sarcasm"].transform("nunique") > 1
-    report["conflicting"] = int(conflicting.sum())
-    train = train[~conflicting]
+    
+    rows = pd.concat([train.assign(split="train"), val.assign(split="val"), test.assign(split="test")])
+    conflicts = rows[rows.groupby("key")["sarcasm"].transform("nunique") > 1]
+    conflicts = conflicts.sort_values(["key", "split", "id"])
+    r["conflict_groups"], r["conflict_rows"] = conflicts["key"].nunique(), len(conflicts)
 
-    report["duplicates"] = int(train["key"].duplicated().sum())
-    train = train.drop_duplicates("key")
+    
+    for name, keys in [("in_test", test["key"]), ("in_val", val["key"]), ("conflicting", conflicts["key"])]:
+        bad = train["key"].isin(keys)
+        r[f"removed_{name}"] = int(bad.sum())
+        train = train[~bad]
 
-    report["end"] = len(train)
-    return train.reset_index(drop=True), report
+    r["removed_duplicates"] = int(train["key"].duplicated().sum())
+    train = train.drop_duplicates("key", keep="first")
+
+    r["end"] = len(train)
+    return train.reset_index(drop=True), r, conflicts
 
 
 def get_data():
     train, val, test = (add_key(f) for f in load_split())
-    train, report = clean_train(train, val, test)
-    return train, val.reset_index(drop=True), test, report
+    train, report, conflicts = clean_train(train, val, test)
+    Path("results").mkdir(exist_ok=True)
+    conflicts.to_csv("results/conflicts.csv", index=False)  
+    return train, val.reset_index(drop=True), test.reset_index(drop=True), report
