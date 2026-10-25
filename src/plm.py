@@ -90,3 +90,63 @@ def cached_npz(path, fn):
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez(path, **out)
     return out
+
+
+# ---------------------------------------------------------------- max-length selection
+def length_stats(lengths):
+    """Descriptive stats of token lengths, incl. the Tukey fence (Q3 + 1.5 IQR) and the longest non-outlier."""
+    L = np.asarray(lengths)
+    q1, q3 = np.percentile(L, [25, 75])
+    fence = q3 + 1.5 * (q3 - q1)
+    return {"mean": float(L.mean()), "std": float(L.std()), "median": float(np.median(L)),
+            "q1": float(q1), "q3": float(q3), "tukey_fence": float(fence),
+            "max_non_outlier": int(L[L <= fence].max()), "p95": float(np.percentile(L, 95)),
+            "p99": float(np.percentile(L, 99)), "p99.5": float(np.percentile(L, 99.5)),
+            "mean+3std": float(L.mean() + 3 * L.std()), "max": int(L.max())}
+
+
+LENGTH_RULES = {"tukey": "max_non_outlier", "p99": "p99", "p99.5": "p99.5", "mean+3std": "mean+3std", "max": "max"}
+
+
+def choose_max_length(stats, rule="p99.5", multiple=8, cap=512):
+    """Apply a rule to the stats, round up to a multiple of 8 (GPU friendly), clip to the model limit."""
+    value = stats[LENGTH_RULES[rule]]
+    return int(min(cap, np.ceil(value / multiple) * multiple))
+
+
+def truncation_table(lengths_by_split, caps):
+    """Share of tweets longer than each candidate cap, for every split. caps: label -> int."""
+    import pandas as pd
+    return pd.DataFrame({s: {f"{k} = {v}": float((np.asarray(L) > v).mean()) for k, v in caps.items()}
+                         for s, L in lengths_by_split.items()})
+
+
+def plot_lengths(series, chosen=None, path=None, log_y=False, title="Token length distribution (train)"):
+    """series: name -> lengths. chosen: name -> final cap (drawn as a thick red line)."""
+    import matplotlib.pyplot as plt
+    n = len(series)
+    fig, axes = plt.subplots(2, n, figsize=(4.8 * n, 5.4), squeeze=False, sharex="col",
+                             gridspec_kw={"height_ratios": [4, 1]})
+    for k, (name, L) in enumerate(series.items()):
+        L = np.asarray(L); s = length_stats(L); ax, bx = axes[0, k], axes[1, k]
+        ax.hist(L, bins=int(min(60, L.max() - L.min() + 1)), color="#9ecae1", edgecolor="white")
+        marks = [("mean", s["mean"], "#e6550d", "-"), ("median", s["median"], "#31a354", "-"),
+                 ("Q3", s["q3"], "#636363", ":"), ("Tukey fence", s["tukey_fence"], "#756bb1", "--"),
+                 ("p99", s["p99"], "#d94801", "--"), ("p99.5", s["p99.5"], "#a63603", "--"),
+                 ("max", s["max"], "black", "-.")]
+        for label, v, c, ls in marks:
+            ax.axvline(v, color=c, ls=ls, lw=1.3, label=f"{label} = {v:.0f}")
+        if chosen and name in chosen:
+            ax.axvline(chosen[name], color="red", lw=3, alpha=.8, label=f"CHOSEN = {chosen[name]}")
+        if log_y:
+            ax.set_yscale("log")
+        ax.set_title(name, fontsize=10); ax.legend(fontsize=7, frameon=False)
+        ax.set_ylabel("tweets")
+        bx.boxplot(L, vert=False, whis=1.5, flierprops={"markersize": 2, "alpha": .4})
+        bx.set_yticks([]); bx.set_xlabel("tokens per tweet (box = IQR, whiskers = 1.5 IQR, dots = outliers)", fontsize=8)
+    fig.suptitle(title)
+    plt.tight_layout()
+    if path:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(path, dpi=200)
+    plt.show()
