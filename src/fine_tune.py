@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from tqdm.auto import tqdm
 from transformers import AutoModel, get_linear_schedule_with_warmup
 
 from src.evaluate import metrics
@@ -29,9 +30,7 @@ PLMS = {
 
 
 
-
 class SingleTask(nn.Module):
-    
     def __init__(self, hf_name):
         super().__init__()
         self.encoder = AutoModel.from_pretrained(hf_name, add_pooling_layer=False)
@@ -47,7 +46,6 @@ class SingleTask(nn.Module):
 
 
 class MultiTask(nn.Module):
-
     def __init__(self, hf_name, lam):
         super().__init__()
         self.lam = lam
@@ -88,13 +86,13 @@ def make_batch(tokenizer, texts, max_len):
 # ---------- training and prediction ----------
 
 def class_weights(y):
-    # Rare class gets a bigger weight. Computed on train only.
+    """Rare class gets a bigger weight. Computed on train only."""
     counts = np.bincount(y)
     return torch.tensor(len(y) / (2 * counts), dtype=torch.float).to(DEVICE)
 
 
 def predict_proba(model, tokenizer, texts, max_len):
-    # P(sarcastic) for every text
+    """P(sarcastic) for every text."""
     model.eval()
     probas = []
     with torch.no_grad():
@@ -107,9 +105,8 @@ def predict_proba(model, tokenizer, texts, max_len):
 
 
 def train_model(model, tokenizer, x_train, y_sarcasm, y_sentiment, x_val, y_val, max_len):
-    # Fine-tune with early stopping on val F1 (sarcastic class).
-    # The model is left at its best epoch. Returns the training time in seconds.
-    
+    """Fine-tune with early stopping on val F1 (sarcastic class).
+    The model is left at its best epoch. Returns the training time in seconds."""
     weights = class_weights(y_sarcasm)
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     total_steps = int(np.ceil(len(x_train) / BATCH_SIZE)) * EPOCHS
@@ -121,7 +118,7 @@ def train_model(model, tokenizer, x_train, y_sarcasm, y_sentiment, x_val, y_val,
     for epoch in range(EPOCHS):
         model.train()
         order = np.random.permutation(len(x_train))
-        for i in range(0, len(order), BATCH_SIZE):
+        for i in tqdm(range(0, len(order), BATCH_SIZE), desc=f"epoch {epoch + 1}", leave=False):
             idx = order[i:i + BATCH_SIZE]
             batch = make_batch(tokenizer, [x_train[j] for j in idx], max_len)
             y_sar = torch.tensor(y_sarcasm[idx]).to(DEVICE)
