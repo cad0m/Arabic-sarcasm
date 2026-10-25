@@ -57,3 +57,5 @@ checkpoints/
 *~
 .DS_Store
 Thumbs.db
+
+results/cache
