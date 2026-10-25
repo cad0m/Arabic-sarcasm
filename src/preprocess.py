@@ -41,6 +41,11 @@ def light_stem_word(word):
     return light.get_stem()
 
 
+def strip_quotes(text):
+    text = text.strip()
+    return text[1:-1] if len(text) > 1 and text[0] == text[-1] == '"' else text
+
+
 def clean_html(text):
     return re.sub(r"<[^>]+>", " ", html.unescape(text))
 
@@ -112,9 +117,10 @@ def stem(text):
 
 # Order here IS the execution order, regardless of the order of names passed in.
 STEPS = {
+    "quotes": strip_quotes,
     "html": clean_html,
-    "remove_urls": remove_urls,        # choose at most one of these two;
-    "replace_urls": replace_urls,      # if neither is chosen, URLs are kept
+    "remove_urls": remove_urls,        
+    "replace_urls": replace_urls,      
     "mentions": replace_mentions,
     "hashtags": segment_hashtags,
     "emoji": emoji_to_arabic,
